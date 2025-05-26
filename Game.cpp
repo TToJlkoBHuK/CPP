@@ -8,7 +8,7 @@
 #include <SFML/Window/Mouse.hpp>
 
 Game::Game()
-    : window(sf::VideoMode({WINDOW_WIDTH, WINDOW_HEIGHT}), "SFML Gems Game", sf::Style::Default)
+    : window(sf::VideoMode({ WINDOW_WIDTH, WINDOW_HEIGHT }), "SFML Gems Game", sf::Style::Default)
 {
     window.setFramerateLimit(60);
     loadResources();

@@ -5,6 +5,90 @@
 #include <chrono>
 #include <memory>
 #include <iostream>
+#include <functional>
+// IdleState
+void IdleState::enter(Board& board) { /* ... */ }
+GameStateBase* IdleState::update(Board& board) {
+    return nullptr;
+}
+void IdleState::exit(Board& board) { /* ... */ }
+bool IdleState::isIdle() const { return true; }
+
+// GemSelectedState
+void GemSelectedState::enter(Board& board) { /* ... */ }
+GameStateBase* GemSelectedState::update(Board& board) {
+    return nullptr;
+}
+void GemSelectedState::exit(Board& board) { /* ... */ }
+// SwappingState
+void SwappingState::enter(Board& board) { /* ... */ }
+GameStateBase* SwappingState::update(Board& board) {
+    std::set<GridCoord> matchesAfterSwap = board.findMatches();
+    if (matchesAfterSwap.empty()) {
+        board.swapGems(board.getSelectedGemCoords(), board.getSelectedGemCoords());
+        return new IdleState();
+    }
+    else {
+        return new CheckingState();
+    }
+}
+void SwappingState::exit(Board& board) { /* ... */ }
+
+// CheckingState
+void CheckingState::enter(Board& board) { /* ... */ }
+GameStateBase* CheckingState::update(Board& board) {
+    std::set<GridCoord> matches = board.findMatches();
+    if (!matches.empty()) {
+        auto destructionResult = board.destroyGems(matches);
+        board.recentlyDestroyedGems = destructionResult.second;
+        return new DestroyingState();
+    }
+    else {
+        return new IdleState();
+    }
+}
+void CheckingState::exit(Board& board) { /* ... */ }
+
+// DestroyingState
+void DestroyingState::enter(Board& board) { /* ... */ }
+GameStateBase* DestroyingState::update(Board& board) {
+    return new ApplyingBonusState();
+}
+void DestroyingState::exit(Board& board) { /* ... */ }
+
+// FallingState
+void FallingState::enter(Board& board) { /* ... */ }
+GameStateBase* FallingState::update(Board& board) {
+    if (board.applyGravity()) {
+        return new RefillingState();
+    }
+    else {
+        return new CheckingState();
+    }
+}
+void FallingState::exit(Board& board) { /* ... */ }
+
+// RefillingState
+void RefillingState::enter(Board& board) { /* ... */ }
+GameStateBase* RefillingState::update(Board& board) {
+    if (board.refillBoard()) {
+        return new CheckingState();
+    }
+    else {
+        return new IdleState();
+    }
+}
+void RefillingState::exit(Board& board) { /* ... */ }
+
+// ApplyingBonusState
+void ApplyingBonusState::enter(Board& board) { /* ... */ }
+GameStateBase* ApplyingBonusState::update(Board& board) {
+    board.trySpawnBonus(board.recentlyDestroyedGems);
+    board.recentlyDestroyedGems.clear();
+    return new FallingState();
+}
+void ApplyingBonusState::exit(Board& board) { /* ... */ }
+
 
 Board::Board(int w, int h, sf::Texture& textureSheet)
     : width(w),
@@ -18,10 +102,7 @@ Board::Board(int w, int h, sf::Texture& textureSheet)
     bonusTypeDist(0, 1),
     gridXDist(0, w - 1),
     gridYDist(0, h - 1),
-    needsMatchCheck(true),
-    needsGravityCheck(false),
-    needsRefillCheck(false),
-    needsBonusProcessing(false)
+    currentState(std::make_unique<IdleState>())
 {
     grid.resize(height);
     for (int r = 0; r < height; ++r) {
@@ -30,6 +111,17 @@ Board::Board(int w, int h, sf::Texture& textureSheet)
 
     initializeBoard();
 }
+
+void Board::setState(std::unique_ptr<GameStateBase> newState) {
+    if (currentState) {
+        currentState->exit(*this);
+    }
+    currentState = std::move(newState);
+    if (currentState) {
+        currentState->enter(*this);
+    }
+}
+
 void Board::initializeBoard() {
     for (int r = 0; r < height; ++r) {
         for (int c = 0; c < width; ++c) {
@@ -37,30 +129,37 @@ void Board::initializeBoard() {
                 createRandomGem(r, c);
             } while (
                 (c >= 2 &&
-                    grid[r][c]->getColor() == grid[r][c - 1]->getColor() &&
-                    grid[r][c]->getColor() == grid[r][c - 2]->getColor())
+                    grid[r][c]->getColor()->getIndex() == grid[r][c - 1]->getColor()->getIndex() &&
+                    grid[r][c]->getColor()->getIndex() == grid[r][c - 2]->getColor()->getIndex())
                 ||
                 (r >= 2 &&
-                    grid[r][c]->getColor() == grid[r - 1][c]->getColor() &&
-                    grid[r][c]->getColor() == grid[r - 2][c]->getColor())
+                    grid[r][c]->getColor()->getIndex() == grid[r - 1][c]->getColor()->getIndex() &&
+                    grid[r][c]->getColor()->getIndex() == grid[r - 2][c]->getColor()->getIndex())
                 );
         }
     }
-    needsMatchCheck = false;
-    needsGravityCheck = false;
-    needsRefillCheck = false;
-    needsBonusProcessing = false;
-
+    setState(std::make_unique<IdleState>());
 }
-void Board::createGem(int r, int c, GemColor color) {
+void Board::createGem(int r, int c, std::unique_ptr<GemColorBase> color) {
     if (isValidCoords(r, c)) {
-        grid[r][c] = std::make_unique<Gem>(color, c, r, textureSheetRef);
+        grid[r][c] = std::make_unique<Gem>(std::move(color), c, r, textureSheetRef);
     }
 }
+
 void Board::createRandomGem(int r, int c) {
     if (isValidCoords(r, c)) {
-        GemColor randomColor = static_cast<GemColor>(gemColorDist(rng));
-        grid[r][c] = std::make_unique<Gem>(randomColor, c, r, textureSheetRef);
+        int randomColorIndex = gemColorDist(rng);
+        std::unique_ptr<GemColorBase> randomColor;
+        switch (randomColorIndex) {
+        case 0: randomColor = std::make_unique<RedGemColor>(); break;
+        case 1: randomColor = std::make_unique<GreenGemColor>(); break;
+        case 2: randomColor = std::make_unique<BlueGemColor>(); break;
+        case 3: randomColor = std::make_unique<YellowGemColor>(); break;
+        case 4: randomColor = std::make_unique<PurpleGemColor>(); break;
+        case 5: randomColor = std::make_unique<OrangeGemColor>(); break;
+        default: randomColor = std::make_unique<NoneGemColor>(); break;
+        }
+        grid[r][c] = std::make_unique<Gem>(std::move(randomColor), c, r, textureSheetRef);
         grid[r][c]->setGridPosition(c, r);
     }
 }
@@ -75,68 +174,34 @@ void Board::draw(sf::RenderWindow& window) {
         }
     }
 }
+
 bool Board::update() {
-    bool changed = false;
-
-    if (needsBonusProcessing) {
-        trySpawnBonus(recentlyDestroyedGems);
-        recentlyDestroyedGems.clear();
-        needsBonusProcessing = false;
-        needsMatchCheck = true;
-        changed = true;
+    GameStateBase* nextState = currentState->update(*this);
+    if (nextState != nullptr) {
+        setState(std::unique_ptr<GameStateBase>(nextState));
+        return true;
     }
-    else if (needsMatchCheck) {
-        std::set<GridCoord> matches = findMatches();
-        if (!matches.empty()) {
-            auto destructionResult = destroyGems(matches);
-            int destroyedCount = destructionResult.first;
-            recentlyDestroyedGems = destructionResult.second;
-
-            if (destroyedCount > 0) {
-                needsGravityCheck = true;
-                needsBonusProcessing = true;
-                changed = true;
-            }
-            needsMatchCheck = false;
-        }
-        else {
-            needsMatchCheck = false;
-        }
-    }
-    else if (needsGravityCheck) {
-        if (applyGravity()) {
-            needsRefillCheck = true;
-            changed = true;
-        }
-        needsGravityCheck = false;
-    }
-    else if (needsRefillCheck) {
-        if (refillBoard()) {
-            needsMatchCheck = true;
-            changed = true;
-        }
-        needsRefillCheck = false;
-    }
-
-    return changed;
+    return false;
 }
 
 
 bool Board::handleMouseClick(sf::Vector2i pixelCoords) {
-    if (!isIdle()) return false;
+    if (!isIdle() && !gemSelected)
+        return false;
 
     int gridX = pixelCoords.x / GEM_SIZE;
     int gridY = pixelCoords.y / GEM_SIZE;
     GridCoord clickedCoords(gridX, gridY);
 
     if (!isValidCoords(clickedCoords)) {
-        gemSelected = false;
+        setState(std::make_unique<IdleState>());
         return false;
     }
 
     if (!gemSelected) {
         selectedGemCoords = clickedCoords;
         gemSelected = true;
+        setState(std::make_unique<GemSelectedState>());
         return true;
     }
     else {
@@ -144,45 +209,42 @@ bool Board::handleMouseClick(sf::Vector2i pixelCoords) {
 
         if (secondClickCoords == selectedGemCoords) {
             gemSelected = false;
+            setState(std::make_unique<IdleState>());
             return true;
         }
 
         if (areAdjacent(selectedGemCoords, secondClickCoords)) {
             swapGems(selectedGemCoords, secondClickCoords);
-            std::set<GridCoord> matchesAfterSwap = findMatches();
-
-            if (matchesAfterSwap.empty()) {
-                swapGems(selectedGemCoords, secondClickCoords);
-                gemSelected = false;
-                return false;
-            }
-            else {
-                needsMatchCheck = true;
-                gemSelected = false;
-                return true;
-            }
+            gemSelected = false;
+            setState(std::make_unique<SwappingState>());
+            return true;
         }
         else {
             selectedGemCoords = secondClickCoords;
-            gemSelected = true;
+            setState(std::make_unique<GemSelectedState>());
             return true;
         }
     }
 }
+
 bool Board::isIdle() const {
-    return !needsMatchCheck && !needsGravityCheck && !needsRefillCheck && !needsBonusProcessing;
+    return currentState->isIdle();
 }
+
 bool Board::isValidCoords(int r, int c) const {
     return r >= 0 && r < height && c >= 0 && c < width;
 }
+
 bool Board::isValidCoords(GridCoord coords) const {
     return isValidCoords(coords.y, coords.x);
 }
+
 bool Board::areAdjacent(GridCoord p1, GridCoord p2) const {
     int dx = std::abs(p1.x - p2.x);
     int dy = std::abs(p1.y - p2.y);
     return (dx == 1 && dy == 0) || (dx == 0 && dy == 1);
 }
+
 void Board::swapGems(GridCoord p1, GridCoord p2) {
     if (!isValidCoords(p1) || !isValidCoords(p2)) return;
 
@@ -197,13 +259,14 @@ void Board::swapGems(GridCoord p1, GridCoord p2) {
         grid[p2.y][p2.x]->setGridPosition(p2.x, p2.y);
     }
 }
+
 std::set<GridCoord> Board::findMatches() {
     std::set<GridCoord> matches;
     for (int r = 0; r < height; ++r) {
         int consecutive = 1;
-        GemColor currentColor = GemColor::None;
+        const GemColorBase* currentColor = nullptr;
         for (int c = 0; c < width; ++c) {
-            if (grid[r][c] && grid[r][c]->getColor() == currentColor) {
+            if (grid[r][c] && grid[r][c]->getColor() && grid[r][c]->getColor()->getIndex() == (currentColor ? currentColor->getIndex() : -2)) {
                 consecutive++;
             }
             else {
@@ -212,7 +275,7 @@ std::set<GridCoord> Board::findMatches() {
                         matches.insert({ i, r });
                     }
                 }
-                currentColor = grid[r][c] ? grid[r][c]->getColor() : GemColor::None;
+                currentColor = grid[r][c] ? grid[r][c]->getColor() : nullptr;
                 consecutive = 1;
             }
         }
@@ -225,9 +288,9 @@ std::set<GridCoord> Board::findMatches() {
 
     for (int c = 0; c < width; ++c) {
         int consecutive = 1;
-        GemColor currentColor = GemColor::None;
+        const GemColorBase* currentColor = nullptr;
         for (int r = 0; r < height; ++r) {
-            if (grid[r][c] && grid[r][c]->getColor() == currentColor) {
+            if (grid[r][c] && grid[r][c]->getColor() && grid[r][c]->getColor()->getIndex() == (currentColor ? currentColor->getIndex() : -2)) {
                 consecutive++;
             }
             else {
@@ -236,7 +299,7 @@ std::set<GridCoord> Board::findMatches() {
                         matches.insert({ c, i });
                     }
                 }
-                currentColor = grid[r][c] ? grid[r][c]->getColor() : GemColor::None;
+                currentColor = grid[r][c] ? grid[r][c]->getColor() : nullptr;
                 consecutive = 1;
             }
         }
@@ -249,9 +312,10 @@ std::set<GridCoord> Board::findMatches() {
 
     return matches;
 }
-std::pair<int, std::vector<std::pair<GridCoord, GemColor>>> Board::destroyGems(const std::set<GridCoord>& coordsToDestroy) {
+
+std::pair<int, std::vector<std::pair<GridCoord, const GemColorBase*>>> Board::destroyGems(const std::set<GridCoord>& coordsToDestroy) {
     int count = 0;
-    std::vector<std::pair<GridCoord, GemColor>> destroyedInfo;
+    std::vector<std::pair<GridCoord, const GemColorBase*>> destroyedInfo;
 
     for (const auto& coord : coordsToDestroy) {
         if (isValidCoords(coord) && grid[coord.y][coord.x]) {
@@ -262,6 +326,7 @@ std::pair<int, std::vector<std::pair<GridCoord, GemColor>>> Board::destroyGems(c
     }
     return { count, destroyedInfo };
 }
+
 bool Board::applyGravity() {
     bool gemsFell = false;
     for (int c = 0; c < width; ++c) {
@@ -283,6 +348,7 @@ bool Board::applyGravity() {
     }
     return gemsFell;
 }
+
 bool Board::refillBoard() {
     bool newGemsAdded = false;
     for (int c = 0; c < width; ++c) {
@@ -299,12 +365,13 @@ bool Board::refillBoard() {
     }
     return newGemsAdded;
 }
-void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, GemColor>>& destroyedGemsInfo) {
+
+void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, const GemColorBase*>>& destroyedGemsInfo) {
     for (const auto& info : destroyedGemsInfo) {
         if (bonusChanceDist(rng) <= BONUS_CHANCE) {
             int bonusType = bonusTypeDist(rng);
             GridCoord bonusOrigin = info.first;
-            GemColor bonusOriginColor = info.second;
+            const GemColorBase* bonusOriginColor = info.second;
             int targetR, targetC;
             int attempts = 0;
             const int maxAttempts = 20;
@@ -324,16 +391,26 @@ void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, GemColor>>& des
                 else {
                     applyBombBonus(targetPos);
                 }
-                needsMatchCheck = true;
             }
         }
     }
 }
-void Board::applyRepaintBonus(GridCoord targetPos, GemColor sourceColor) {
-    if (!isValidCoords(targetPos) || sourceColor == GemColor::None) return;
+
+void Board::applyRepaintBonus(GridCoord targetPos, const GemColorBase* sourceColor) {
+    if (!isValidCoords(targetPos) || !sourceColor || sourceColor->getIndex() == -1) return;
 
     if (grid[targetPos.y][targetPos.x]) {
-        grid[targetPos.y][targetPos.x]->setColor(sourceColor);
+        std::unique_ptr<GemColorBase> newColor;
+        switch (sourceColor->getIndex()) {
+        case 0: newColor = std::make_unique<RedGemColor>(); break;
+        case 1: newColor = std::make_unique<GreenGemColor>(); break;
+        case 2: newColor = std::make_unique<BlueGemColor>(); break;
+        case 3: newColor = std::make_unique<YellowGemColor>(); break;
+        case 4: newColor = std::make_unique<PurpleGemColor>(); break;
+        case 5: newColor = std::make_unique<OrangeGemColor>(); break;
+        default: newColor = std::make_unique<NoneGemColor>(); break;
+        }
+        grid[targetPos.y][targetPos.x]->setColor(std::move(newColor));
     }
 
     std::vector<GridCoord> candidates;
@@ -352,12 +429,21 @@ void Board::applyRepaintBonus(GridCoord targetPos, GemColor sourceColor) {
     int count = 0;
     for (const auto& pos : candidates) {
         if (count >= 2) break;
-        grid[pos.y][pos.x]->setColor(sourceColor);
+        std::unique_ptr<GemColorBase> newColor;
+        switch (sourceColor->getIndex()) {
+        case 0: newColor = std::make_unique<RedGemColor>(); break;
+        case 1: newColor = std::make_unique<GreenGemColor>(); break;
+        case 2: newColor = std::make_unique<BlueGemColor>(); break;
+        case 3: newColor = std::make_unique<YellowGemColor>(); break;
+        case 4: newColor = std::make_unique<PurpleGemColor>(); break;
+        case 5: newColor = std::make_unique<OrangeGemColor>(); break;
+        default: newColor = std::make_unique<NoneGemColor>(); break;
+        }
+        grid[pos.y][pos.x]->setColor(std::move(newColor));
         count++;
     }
-
-    needsMatchCheck = true;
 }
+
 void Board::applyBombBonus(GridCoord targetPos) {
     std::set<GridCoord> gemsToDestroy;
 
@@ -382,38 +468,53 @@ void Board::applyBombBonus(GridCoord targetPos) {
 
     if (!gemsToDestroy.empty()) {
         destroyGems(gemsToDestroy);
-        needsGravityCheck = true;
     }
 }
+
 bool Board::hasPossibleMoves() const {
     for (int r = 0; r < height; ++r) {
         for (int c = 0; c < width; ++c) {
             if (!grid[r][c]) continue;
 
-            GemColor current = grid[r][c]->getColor();
-            if (c + 1 < width && grid[r][c + 1]) {
-                GemColor right = grid[r][c + 1]->getColor();
-                if (c + 2 < width && grid[r][c + 2] && grid[r][c + 2]->getColor() == current) return true;
-                if (r - 1 >= 0 && r + 1 < height && grid[r - 1][c + 1] && grid[r - 1][c + 1]->getColor() == current && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() == current) return true;
-                if (r + 2 < height && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() == current && grid[r + 2][c + 1] && grid[r + 2][c + 1]->getColor() == current) return true;
-                if (r - 2 >= 0 && grid[r - 1][c + 1] && grid[r - 1][c + 1]->getColor() == current && grid[r - 2][c + 1] && grid[r - 2][c + 1]->getColor() == current) return true;
-                if (c - 1 >= 0 && grid[r][c - 1] && grid[r][c - 1]->getColor() == right) return true;
-                if (r - 1 >= 0 && r + 1 < height && grid[r - 1][c] && grid[r - 1][c]->getColor() == right && grid[r + 1][c] && grid[r + 1][c]->getColor() == right) return true;
-                if (r + 2 < height && grid[r + 1][c] && grid[r + 1][c]->getColor() == right && grid[r + 2][c] && grid[r + 2][c]->getColor() == right) return true;
-                if (r - 2 >= 0 && grid[r - 1][c] && grid[r - 1][c]->getColor() == right && grid[r - 2][c] && grid[r - 2][c]->getColor() == right) return true;
+            const GemColorBase* current = grid[r][c]->getColor();
+            if (!current || current->getIndex() == -1) continue;
+            if (c + 1 < width && grid[r][c + 1] && grid[r][c + 1]->getColor() && grid[r][c + 1]->getColor()->getIndex() != -1) {
+                const GemColorBase* right = grid[r][c + 1]->getColor();
+                if (c + 2 < width && grid[r][c + 2] && grid[r][c + 2]->getColor() && grid[r][c + 2]->getColor()->getIndex() == current->getIndex()) return true;
+                if (r - 1 >= 0 && r + 1 < height && grid[r - 1][c + 1] && grid[r - 1][c + 1]->getColor() && grid[r - 1][c + 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() && grid[r + 1][c + 1]->getColor()->getIndex() == current->getIndex()) return true;
+                if (r + 2 < height && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() && grid[r + 1][c + 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r + 2][c + 1] && grid[r + 2][c + 1]->getColor() && grid[r + 2][c + 1]->getColor()->getIndex() == current->getIndex()) return true;
 
+                if (r - 2 >= 0 && grid[r - 1][c + 1] && grid[r - 1][c + 1]->getColor() && grid[r - 1][c + 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r - 2][c + 1] && grid[r - 2][c + 1]->getColor() && grid[r - 2][c + 1]->getColor()->getIndex() == current->getIndex()) return true;
+                if (c - 1 >= 0 && grid[r][c - 1] && grid[r][c - 1]->getColor() && grid[r][c - 1]->getColor()->getIndex() == right->getIndex()) return true;
+                if (r - 1 >= 0 && r + 1 < height && grid[r - 1][c] && grid[r - 1][c]->getColor() && grid[r - 1][c]->getColor()->getIndex() == right->getIndex() &&
+                    grid[r + 1][c] && grid[r + 1][c]->getColor() && grid[r + 1][c]->getColor()->getIndex() == right->getIndex()) return true;
+                if (r + 2 < height && grid[r + 1][c] && grid[r + 1][c]->getColor() && grid[r + 1][c]->getColor()->getIndex() == right->getIndex() &&
+                    grid[r + 2][c] && grid[r + 2][c]->getColor() && grid[r + 2][c]->getColor()->getIndex() == right->getIndex()) return true;
+
+                if (r - 2 >= 0 && grid[r - 1][c] && grid[r - 1][c]->getColor() && grid[r - 1][c]->getColor()->getIndex() == right->getIndex() &&
+                    grid[r - 2][c] && grid[r - 2][c]->getColor() && grid[r - 2][c]->getColor()->getIndex() == right->getIndex()) return true;
             }
-            if (r + 1 < height && grid[r + 1][c]) {
-                GemColor down = grid[r + 1][c]->getColor();
-                if (r + 2 < height && grid[r + 2][c] && grid[r + 2][c]->getColor() == current) return true;
-                if (c - 1 >= 0 && c + 1 < width && grid[r + 1][c - 1] && grid[r + 1][c - 1]->getColor() == current && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() == current) return true;
-                if (c + 2 < width && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() == current && grid[r + 1][c + 2] && grid[r + 1][c + 2]->getColor() == current) return true;
-                if (c - 2 >= 0 && grid[r + 1][c - 1] && grid[r + 1][c - 1]->getColor() == current && grid[r + 1][c - 2] && grid[r + 1][c - 2]->getColor() == current) return true;
+            if (r + 1 < height && grid[r + 1][c] && grid[r + 1][c]->getColor() && grid[r + 1][c]->getColor()->getIndex() != -1) {
+                const GemColorBase* down = grid[r + 1][c]->getColor();
+                if (r + 2 < height && grid[r + 2][c] && grid[r + 2][c]->getColor() && grid[r + 2][c]->getColor()->getIndex() == current->getIndex()) return true;
+                if (c - 1 >= 0 && c + 1 < width && grid[r + 1][c - 1] && grid[r + 1][c - 1]->getColor() && grid[r + 1][c - 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() && grid[r + 1][c + 1]->getColor()->getIndex() == current->getIndex()) return true;
+                if (c + 2 < width && grid[r + 1][c + 1] && grid[r + 1][c + 1]->getColor() && grid[r + 1][c + 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r + 1][c + 2] && grid[r + 1][c + 2]->getColor() && grid[r + 1][c + 2]->getColor()->getIndex() == current->getIndex()) return true;
 
-                if (r - 1 >= 0 && grid[r - 1][c] && grid[r - 1][c]->getColor() == down) return true;
-                if (c - 1 >= 0 && c + 1 < width && grid[r][c - 1] && grid[r][c - 1]->getColor() == down && grid[r][c + 1] && grid[r][c + 1]->getColor() == down) return true;
-                if (c + 2 < width && grid[r][c + 1] && grid[r][c + 1]->getColor() == down && grid[r][c + 2] && grid[r][c + 2]->getColor() == down) return true;
-                if (c - 2 >= 0 && grid[r][c - 1] && grid[r][c - 1]->getColor() == down && grid[r][c - 2] && grid[r][c - 2]->getColor() == down) return true;
+                if (c - 2 >= 0 && grid[r + 1][c - 1] && grid[r + 1][c - 1]->getColor() && grid[r + 1][c - 1]->getColor()->getIndex() == current->getIndex() &&
+                    grid[r + 1][c - 2] && grid[r + 1][c - 2]->getColor() && grid[r + 1][c - 2]->getColor()->getIndex() == current->getIndex()) return true;
+                if (r - 1 >= 0 && grid[r - 1][c] && grid[r - 1][c]->getColor() && grid[r - 1][c]->getColor()->getIndex() == down->getIndex()) return true;
+                if (c - 1 >= 0 && c + 1 < width && grid[r][c - 1] && grid[r][c - 1]->getColor() && grid[r][c - 1]->getColor()->getIndex() == down->getIndex() &&
+                    grid[r][c + 1] && grid[r][c + 1]->getColor() && grid[r][c + 1]->getColor()->getIndex() == down->getIndex()) return true;
+                if (c + 2 < width && grid[r][c + 1] && grid[r][c + 1]->getColor() && grid[r][c + 1]->getColor()->getIndex() == down->getIndex() &&
+                    grid[r][c + 2] && grid[r][c + 2]->getColor() && grid[r][c + 2]->getColor()->getIndex() == down->getIndex()) return true;
+
+                if (c - 2 >= 0 && grid[r][c - 1] && grid[r][c - 1]->getColor() && grid[r][c - 1]->getColor()->getIndex() == down->getIndex() &&
+                    grid[r][c - 2] && grid[r][c - 2]->getColor() && grid[r][c - 2]->getColor()->getIndex() == down->getIndex()) return true;
             }
         }
     }

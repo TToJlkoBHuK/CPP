@@ -1,23 +1,23 @@
-
 #pragma once
 
 #include <SFML/Graphics.hpp>
 #include "Config.h"
+#include <memory>
 
 class Gem {
 public:
-    Gem(GemColor color, int gridX, int gridY, sf::Texture& textureSheet);
+    Gem(std::unique_ptr<GemColorBase> c, int gridX, int gridY, sf::Texture& textureSheet);
     void draw(sf::RenderWindow& window);
     void setGridPosition(int gridX, int gridY);
     GridCoord getGridPosition() const;
-    GemColor getColor() const;
-    void setColor(GemColor newColor);
+    const GemColorBase* getColor() const;
+    void setColor(std::unique_ptr<GemColorBase> newColor);
     sf::Vector2f getVisualPosition() const;
     void setVisualPosition(float x, float y);
 
 private:
     sf::Sprite sprite;
-    GemColor color;
+    std::unique_ptr<GemColorBase> color;
     GridCoord gridPosition;
     sf::Texture& textureSheetRef;
     void updateTextureRect();
