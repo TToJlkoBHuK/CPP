@@ -4,23 +4,39 @@
 #include <SFML/Graphics.hpp>
 #include <vector>
 #include <string>
+#include <memory>
 #include "constants.h"
 #include "Paddle.h"
 #include "Ball.h"
-#include "Brick.h"
-#include "Bonus.h"
+
+class Brick;
+class Bonus;
 
 class Game {
 public:
     Game();
+    ~Game();
+
     void run();
+
+    Paddle& getPaddle();
+    std::vector<Ball>& getBalls();
+
+    void addScore(int points);
+    void loseLife();
+
+    void setPaddleSticky(bool sticky);
+    void setSafetyNetActive(bool active);
+    void spawnAdditionalBall();
+    void addActiveBonus(std::unique_ptr<Bonus> bonus);
+
 
 private:
     sf::RenderWindow window;
     Paddle paddle;
     std::vector<Ball> balls;
-    std::vector<Brick> bricks;
-    std::vector<Bonus> activeBonuses;
+    std::vector<std::unique_ptr<Brick>> bricks;
+    std::vector<std::unique_ptr<Bonus>> activeBonuses;
 
     int score;
     int lives;
@@ -34,26 +50,23 @@ private:
 
     sf::Clock deltaClock;
 
+    void setupText(sf::Text& text, unsigned int charSize, sf::Color color, float x, float y);
+    void loadLevel(int levelNumber = 1);
+    void resetLevelState();
+    void resetGame();
+
     void processEvents();
     void update(sf::Time dt);
     void render();
 
-    void loadLevel();    
-    void resetLevel();   
-    void resetGame();    
-
     void handleCollisions();
     void handleBallWallCollision(Ball& ball);
     void handleBallPaddleCollision(Ball& ball);
-    void handleBallBrickCollision(Ball& ball, Brick& brick, size_t brickIndex);
-    void handlePaddleBonusCollision(Bonus& bonus, size_t bonusIndex);
-    void handleBallBallCollision(Ball& ball1, Ball& ball2); 
+    void handleBallBrickCollision(Ball& ball, Brick& brick);
+    void handlePaddleBonusCollision(Paddle& paddle, Bonus& bonus);
+    void handleBallBallCollision(Ball& ball1, Ball& ball2);
 
-    void spawnBonusItem(const Brick& brick); 
-    void applyBonusEffect(BonusType type);   
-
-    void updateUI(); 
-    void setupText(sf::Text& text, int charSize, sf::Color color, float x, float y);
+    void updateUI();
 };
 
 #endif // GAME_H
