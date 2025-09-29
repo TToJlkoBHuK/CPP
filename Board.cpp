@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 #include "Board.h"
 #include <vector>
 #include <set>
@@ -313,13 +315,13 @@ std::set<GridCoord> Board::findMatches() {
     return matches;
 }
 
-std::pair<int, std::vector<std::pair<GridCoord, const GemColorBase*>>> Board::destroyGems(const std::set<GridCoord>& coordsToDestroy) {
+std::pair<int, std::vector<std::pair<GridCoord, int>>> Board::destroyGems(const std::set<GridCoord>& coordsToDestroy) {
     int count = 0;
-    std::vector<std::pair<GridCoord, const GemColorBase*>> destroyedInfo;
+    std::vector<std::pair<GridCoord, int>> destroyedInfo;
 
     for (const auto& coord : coordsToDestroy) {
         if (isValidCoords(coord) && grid[coord.y][coord.x]) {
-            destroyedInfo.push_back({ coord, grid[coord.y][coord.x]->getColor() });
+            destroyedInfo.push_back({ coord, grid[coord.y][coord.x]->getColor()->getIndex() });
             grid[coord.y][coord.x].reset();
             count++;
         }
@@ -366,12 +368,12 @@ bool Board::refillBoard() {
     return newGemsAdded;
 }
 
-void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, const GemColorBase*>>& destroyedGemsInfo) {
+void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, int>>& destroyedGemsInfo) {
     for (const auto& info : destroyedGemsInfo) {
         if (bonusChanceDist(rng) <= BONUS_CHANCE) {
             int bonusType = bonusTypeDist(rng);
             GridCoord bonusOrigin = info.first;
-            const GemColorBase* bonusOriginColor = info.second;
+            int bonusOriginColorIndex = info.second;
             int targetR, targetC;
             int attempts = 0;
             const int maxAttempts = 20;
@@ -386,7 +388,7 @@ void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, const GemColorB
             if (isValidCoords(targetR, targetC)) {
                 GridCoord targetPos = { targetC, targetR };
                 if (bonusType == 0) {
-                    applyRepaintBonus(targetPos, bonusOriginColor);
+                    applyRepaintBonus(targetPos, bonusOriginColorIndex);
                 }
                 else {
                     applyBombBonus(targetPos);
@@ -396,12 +398,12 @@ void Board::trySpawnBonus(const std::vector<std::pair<GridCoord, const GemColorB
     }
 }
 
-void Board::applyRepaintBonus(GridCoord targetPos, const GemColorBase* sourceColor) {
-    if (!isValidCoords(targetPos) || !sourceColor || sourceColor->getIndex() == -1) return;
+void Board::applyRepaintBonus(GridCoord targetPos, int sourceColorIndex) {
+    if (!isValidCoords(targetPos) || sourceColorIndex == -1) return;
 
     if (grid[targetPos.y][targetPos.x]) {
         std::unique_ptr<GemColorBase> newColor;
-        switch (sourceColor->getIndex()) {
+        switch (sourceColorIndex) {
         case 0: newColor = std::make_unique<RedGemColor>(); break;
         case 1: newColor = std::make_unique<GreenGemColor>(); break;
         case 2: newColor = std::make_unique<BlueGemColor>(); break;
@@ -430,7 +432,7 @@ void Board::applyRepaintBonus(GridCoord targetPos, const GemColorBase* sourceCol
     for (const auto& pos : candidates) {
         if (count >= 2) break;
         std::unique_ptr<GemColorBase> newColor;
-        switch (sourceColor->getIndex()) {
+        switch (sourceColorIndex) {
         case 0: newColor = std::make_unique<RedGemColor>(); break;
         case 1: newColor = std::make_unique<GreenGemColor>(); break;
         case 2: newColor = std::make_unique<BlueGemColor>(); break;

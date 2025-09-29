@@ -86,11 +86,11 @@ public:
     bool areAdjacent(GridCoord p1, GridCoord p2) const;
     void swapGems(GridCoord p1, GridCoord p2);
     std::set<GridCoord> findMatches();
-    std::pair<int, std::vector<std::pair<GridCoord, const GemColorBase*>>> destroyGems(const std::set<GridCoord>& coordsToDestroy);
+    std::pair<int, std::vector<std::pair<GridCoord, int>>> destroyGems(const std::set<GridCoord>& coordsToDestroy);
     bool applyGravity();
     bool refillBoard();
-    void trySpawnBonus(const std::vector<std::pair<GridCoord, const GemColorBase*>>& destroyedGemsInfo);
-    void applyRepaintBonus(GridCoord targetPos, const GemColorBase* sourceColor);
+    void trySpawnBonus(const std::vector<std::pair<GridCoord, int>>& destroyedGemsInfo);
+    void applyRepaintBonus(GridCoord targetPos, int sourceColorIndex);
     void applyBombBonus(GridCoord targetPos);
     void createGem(int r, int c, std::unique_ptr<GemColorBase> color);
     void createRandomGem(int r, int c);
@@ -105,7 +105,7 @@ public:
     std::uniform_int_distribution<int>& getGridYDist() { return gridYDist; }
     int getWidth() const { return width; }
     int getHeight() const { return height; }
-    std::vector<std::pair<GridCoord, const GemColorBase*>> recentlyDestroyedGems;
+    std::vector<std::pair<GridCoord, int>> recentlyDestroyedGems;
 
     bool hasPossibleMoves() const;
 
